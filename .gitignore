@@ -1,0 +1,26 @@
+# Node
+node_modules/
+dist/
+.env
+.env.local
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+venv/
+.pytest_cache/
+*.pkl
+
+# Databases & Volumes
+postgres_data/
+*.db
+*.sqlite
+
+# OS files
+.DS_Store
+.idea/
+.vscode/
