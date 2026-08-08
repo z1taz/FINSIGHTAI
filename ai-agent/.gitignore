@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+reports/*.csv
+reports/*.json
+data/transactions.csv
+eval/eval_set.jsonl
