@@ -1,4 +1,4 @@
-# FinSight AI — Fraud Explainer Agent + Eval Harness
+# FinSight AI: Fraud Explainer Agent + Eval Harness
 
 An agent that explains *why* [FinSightAI](https://github.com/z1taz/FinSightAI)'s
 fraud detector flagged a transaction, grounded in retrieved policy
