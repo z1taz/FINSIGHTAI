@@ -10,6 +10,10 @@ class TransactionBase(BaseModel):
     mcc_code: Optional[str] = "5999"
     is_merchant_verified: Optional[bool] = True
     transaction_date: datetime
+    device_id: Optional[str] = "DEV-8201"
+    ip_address: Optional[str] = "198.51.100.12"
+    location: Optional[str] = "Primary Jurisdiction"
+    card_last4: Optional[str] = "4821"
 
 class TransactionCreate(TransactionBase):
     pass
@@ -21,6 +25,7 @@ class TransactionResponse(TransactionBase):
     is_merchant_verified: bool = True
     is_fraudulent: int
     fraud_score: float
+    case_id: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -31,4 +36,3 @@ class PaginatedTransactions(BaseModel):
     page: int
     pages: int
     limit: int
-
