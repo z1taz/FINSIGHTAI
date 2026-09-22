@@ -6,10 +6,12 @@ from datetime import datetime, timezone
 from typing import Optional, List
 import csv
 import io
+import random
 
 from app.database import get_db
 from app.models.transaction import Transaction
 from app.models.user import User
+from app.models.case import Case, CaseAuditLog, CaseStatus
 from app.schemas.transaction import TransactionCreate, TransactionResponse, PaginatedTransactions
 from app.services.auth_service import get_current_user
 from app.services.fraud_detector import fraud_detector
@@ -22,6 +24,11 @@ async def create_transaction(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
+    device_id = transaction_in.device_id or f"DEV-{random.randint(1000, 9999)}"
+    ip_addr = transaction_in.ip_address or f"198.51.100.{random.randint(2, 250)}"
+    loc = transaction_in.location or "Primary Jurisdiction"
+    card4 = transaction_in.card_last4 or "4821"
+
     tx_dict = {
         "amount": transaction_in.amount,
         "category": transaction_in.category,
@@ -29,12 +36,16 @@ async def create_transaction(
         "description": transaction_in.description,
         "mcc_code": transaction_in.mcc_code or "5999",
         "is_merchant_verified": transaction_in.is_merchant_verified if transaction_in.is_merchant_verified is not None else True,
-        "transaction_date": transaction_in.transaction_date
+        "transaction_date": transaction_in.transaction_date,
+        "device_id": device_id,
+        "ip_address": ip_addr,
+        "location": loc
     }
     
-    # Run immediate cybersecurity assessment using user's monthly income
-    predictions = fraud_detector.predict([tx_dict], monthly_income_baseline=current_user.monthly_income)
-    is_fraud, score = predictions[0]
+    # Run structured risk engine
+    calc = fraud_detector.calculate_structured_risk(tx_dict, monthly_income_baseline=current_user.monthly_income)
+    is_fraud = 1 if calc["is_flagged"] else 0
+    score = calc["score"]
 
     db_transaction = Transaction(
         user_id=current_user.id,
@@ -46,11 +57,49 @@ async def create_transaction(
         is_merchant_verified=transaction_in.is_merchant_verified if transaction_in.is_merchant_verified is not None else True,
         transaction_date=transaction_in.transaction_date,
         is_fraudulent=is_fraud,
-        fraud_score=score
+        fraud_score=score,
+        device_id=device_id,
+        ip_address=ip_addr,
+        location=loc,
+        card_last4=card4
     )
     db.add(db_transaction)
     await db.commit()
     await db.refresh(db_transaction)
+
+    # Core Product Workflow (Section 3 & 4): Alert -> Case Conversion
+    if is_fraud:
+        case_num = f"CASE-{db_transaction.id + 1000}"
+        db_case = Case(
+            case_number=case_num,
+            transaction_id=db_transaction.id,
+            user_id=current_user.id,
+            status=CaseStatus.NEW.value,
+            risk_score=score,
+            risk_level=calc["risk_level"],
+            risk_factors=calc["risk_factors"]
+        )
+        db.add(db_case)
+        await db.commit()
+        await db.refresh(db_case)
+
+        # Audit Trail: Initial Case Creation Event
+        audit = CaseAuditLog(
+            case_id=db_case.id,
+            actor="RISK_ENGINE",
+            actor_id="FinSight-RulesEngine-v2",
+            action="CASE_CREATED",
+            details=f"Suspicious transaction alert triggered (Risk Score: {score}/100, {calc['risk_level']}). New case {case_num} opened for investigation.",
+            event_metadata={
+                "risk_factors": calc["risk_factors"],
+                "mcc_code": tx_dict["mcc_code"],
+                "merchant": tx_dict["merchant"],
+                "amount": tx_dict["amount"]
+            }
+        )
+        db.add(audit)
+        await db.commit()
+
     return db_transaction
 
 @router.post("/upload-statement", response_model=List[TransactionResponse])
@@ -66,14 +115,10 @@ async def upload_bank_statement(
     text = content.decode('utf-8')
     csv_reader = csv.DictReader(io.StringIO(text))
 
-    new_txs = []
     tx_dicts = []
-
-    # Known corporate verified merchants list for automatic verification lookup
     VERIFIED_KEYWORDS = ["mcdonald", "uber", "lyft", "amazon", "target", "walmart", "netflix", "spotify", "apple", "starbucks", "jio", "bigbasket", "dmart", "zomato", "apollo", "bookstore", "chipotle", "peet"]
 
     for row in csv_reader:
-        # Standard column names: amount, merchant, category, date/transaction_date
         amount = float(row.get("amount") or row.get("Amount") or 0.0)
         merchant = row.get("merchant") or row.get("Merchant") or row.get("description") or "Unknown Merchant"
         category = row.get("category") or row.get("Category") or "Other"
@@ -84,11 +129,11 @@ async def upload_bank_statement(
         except Exception:
             tx_date = datetime.now(timezone.utc)
 
-        # Auto-detect merchant entity verification
         merchant_lower = merchant.lower()
         is_verified = any(k in merchant_lower for k in VERIFIED_KEYWORDS) or row.get("is_verified", "").lower() in ["true", "1", "yes"]
-
         mcc = row.get("mcc_code") or row.get("mcc") or ("5814" if "food" in category.lower() else "5999")
+        dev_id = row.get("device_id") or f"DEV-{random.randint(1000, 9999)}"
+        ip_addr = row.get("ip_address") or f"198.51.100.{random.randint(2, 250)}"
 
         tx_dict = {
             "amount": abs(amount),
@@ -97,18 +142,24 @@ async def upload_bank_statement(
             "description": row.get("description", "Imported from Bank Statement"),
             "mcc_code": mcc,
             "is_merchant_verified": is_verified,
-            "transaction_date": tx_date
+            "transaction_date": tx_date,
+            "device_id": dev_id,
+            "ip_address": ip_addr,
+            "location": row.get("location", "Primary Jurisdiction")
         }
         tx_dicts.append(tx_dict)
 
     if not tx_dicts:
         raise HTTPException(status_code=400, detail="No valid transactions found in CSV statement.")
 
-    # Run automated batch cybersecurity scanning
-    predictions = fraud_detector.predict(tx_dicts, monthly_income_baseline=current_user.monthly_income)
-
     db_items = []
-    for tx_dict, (is_fraud, score) in zip(tx_dicts, predictions):
+    cases_to_create = []
+
+    for tx_dict in tx_dicts:
+        calc = fraud_detector.calculate_structured_risk(tx_dict, monthly_income_baseline=current_user.monthly_income)
+        is_fraud = 1 if calc["is_flagged"] else 0
+        score = calc["score"]
+
         db_tx = Transaction(
             user_id=current_user.id,
             amount=tx_dict["amount"],
@@ -119,17 +170,49 @@ async def upload_bank_statement(
             is_merchant_verified=tx_dict["is_merchant_verified"],
             transaction_date=tx_dict["transaction_date"],
             is_fraudulent=is_fraud,
-            fraud_score=score
+            fraud_score=score,
+            device_id=tx_dict["device_id"],
+            ip_address=tx_dict["ip_address"],
+            location=tx_dict["location"]
         )
         db.add(db_tx)
-        db_items.append(db_tx)
+        db_items.append((db_tx, calc))
 
     await db.commit()
-    for db_tx in db_items:
+
+    # Create cases for all flagged items
+    for db_tx, calc in db_items:
         await db.refresh(db_tx)
+        if db_tx.is_fraudulent:
+            case_num = f"CASE-{db_tx.id + 1000}"
+            db_case = Case(
+                case_number=case_num,
+                transaction_id=db_tx.id,
+                user_id=current_user.id,
+                status=CaseStatus.NEW.value,
+                risk_score=calc["score"],
+                risk_level=calc["risk_level"],
+                risk_factors=calc["risk_factors"]
+            )
+            db.add(db_case)
+            cases_to_create.append((db_case, case_num, calc))
 
-    return db_items
+    if cases_to_create:
+        await db.commit()
+        for db_case, case_num, calc in cases_to_create:
+            await db.refresh(db_case)
+            audit = CaseAuditLog(
+                case_id=db_case.id,
+                actor="RISK_ENGINE",
+                actor_id="FinSight-RulesEngine-v2",
+                action="CASE_CREATED",
+                details=f"Statement ingestion alert triggered (Risk Score: {calc['score']}/100, {calc['risk_level']}). Case {case_num} opened.",
+                event_metadata={"risk_factors": calc["risk_factors"]}
+            )
+            db.add(audit)
+        await db.commit()
 
+    return [item[0] for item in db_items]
 
 @router.get("", response_model=PaginatedTransactions)
 async def get_transactions(
@@ -144,26 +227,19 @@ async def get_transactions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    # Base filter for current user
     conditions = [Transaction.user_id == current_user.id]
     
-    # Category filter (uses idx_user_date_category via compound index or direct idx_category)
     if category:
         conditions.append(Transaction.category == category)
-        
-    # Date filters (hits composite index idx_user_date_category)
     if start_date:
         conditions.append(Transaction.transaction_date >= start_date)
     if end_date:
         conditions.append(Transaction.transaction_date <= end_date)
-        
-    # Amount filters (hits composite index idx_user_amount)
     if min_amount is not None:
         conditions.append(Transaction.amount >= min_amount)
     if max_amount is not None:
         conditions.append(Transaction.amount <= max_amount)
         
-    # Full-text style query filter for description or merchant
     if search:
         search_filter = or_(
             Transaction.merchant.ilike(f"%{search}%"),
@@ -173,12 +249,10 @@ async def get_transactions(
         
     query_filter = and_(*conditions)
     
-    # Count total matching transactions
     count_stmt = select(func.count()).select_from(Transaction).where(query_filter)
     count_result = await db.execute(count_stmt)
     total = count_result.scalar() or 0
     
-    # Retrieve paginated items
     select_stmt = (
         select(Transaction)
         .where(query_filter)
