@@ -14,35 +14,50 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Set up CORS middleware to allow connection from the React frontend
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify actual domain
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include API routers
+# API routers
 app.include_router(auth.router, prefix=settings.API_V1_STR)
 app.include_router(transactions.router, prefix=settings.API_V1_STR)
 app.include_router(analytics.router, prefix=settings.API_V1_STR)
 app.include_router(admin.router, prefix=settings.API_V1_STR)
 
-
 @app.on_event("startup")
 async def startup_event():
     print("Starting up FastAPI application...")
     
-    # 1. Ensure database tables exist
-    print("Verifying database tables...")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        
-    # 2. Run seed process to insert 10,000+ records and pre-train model
-    print("Checking database seed status...")
-    async with SessionLocal() as db:
-        await seed_all(db)
+    # Retry database connection with exponential backoff
+    max_retries = 5
+    for attempt in range(1, max_retries + 1):
+        try:
+            # 1. Ensure database tables exist
+            print(f"Verifying database tables... (attempt {attempt}/{max_retries})")
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+                
+            # 2. Run seed process to insert 10,000+ records and pre-train model
+            print("Checking database seed status...")
+            async with SessionLocal() as db:
+                await seed_all(db)
+            
+            print("Database startup completed successfully!")
+            break
+        except Exception as e:
+            print(f"Database connection attempt {attempt}/{max_retries} failed: {e}")
+            if attempt == max_retries:
+                print("ERROR: All database connection attempts failed.")
+                print("Hint: Check that DATABASE_URL is set correctly and the database is reachable.")
+                raise
+            wait_time = 2 ** attempt  # 2, 4, 8, 16, 32 seconds
+            print(f"Retrying in {wait_time} seconds...")
+            await asyncio.sleep(wait_time)
 
 @app.get("/")
 async def root():
