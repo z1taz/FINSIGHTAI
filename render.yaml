@@ -3,8 +3,10 @@ services:
   - type: web
     name: finsight-backend
     runtime: python
+    region: oregon
     buildCommand: pip install -r backend/requirements.txt
     startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -17,6 +19,7 @@ services:
   - type: web
     name: finsight-frontend
     runtime: static
+    region: oregon
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: ./frontend/dist
     envVars:
@@ -28,4 +31,5 @@ databases:
   - name: finsight-postgres
     databaseName: finsight
     user: finsight_user
+    region: oregon
     plan: free
