@@ -3,15 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.future import select
 from app.config import settings
 from app.database import engine, Base, SessionLocal
-from app.routers import auth, transactions, analytics, admin
+from app.routers import auth, transactions, analytics, admin, cases, network, evaluation, policies, governance
 from app.seed_data import seed_all
-from app.models.user import User
+# Import all models to ensure metadata registration
+from app.models import User, Transaction, Case, CaseAuditLog, AgentInvestigationRun
 import asyncio
 
 app = FastAPI(
-    title=settings.PROJECT_NAME,
-    description="Personal Finance & Fraud Analytics API",
-    version="1.0.0"
+    title="FinSight AI Risk Operations API",
+    description="AI-assisted fraud investigation and risk-operations platform",
+    version="2.0.0"
 )
 
 # CORS middleware
@@ -25,13 +26,18 @@ app.add_middleware(
 
 # API routers
 app.include_router(auth.router, prefix=settings.API_V1_STR)
+app.include_router(cases.router, prefix=settings.API_V1_STR)
+app.include_router(network.router, prefix=settings.API_V1_STR)
+app.include_router(evaluation.router, prefix=settings.API_V1_STR)
+app.include_router(policies.router, prefix=settings.API_V1_STR)
+app.include_router(governance.router, prefix=settings.API_V1_STR)
 app.include_router(transactions.router, prefix=settings.API_V1_STR)
 app.include_router(analytics.router, prefix=settings.API_V1_STR)
 app.include_router(admin.router, prefix=settings.API_V1_STR)
 
 @app.on_event("startup")
 async def startup_event():
-    print("Starting up FastAPI application...")
+    print("Starting up FinSight AI application...")
     
     # Retry database connection with exponential backoff
     max_retries = 5
@@ -42,12 +48,12 @@ async def startup_event():
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
                 
-            # 2. Run seed process to insert 10,000+ records and pre-train model
+            # 2. Run seed process
             print("Checking database seed status...")
             async with SessionLocal() as db:
                 await seed_all(db)
             
-            print("Database startup completed successfully!")
+            print("FinSight AI startup completed successfully!")
             break
         except Exception as e:
             print(f"Database connection attempt {attempt}/{max_retries} failed: {e}")
@@ -62,7 +68,8 @@ async def startup_event():
 @app.get("/")
 async def root():
     return {
-        "message": "Welcome to FinSight AI API",
+        "platform": "FinSight AI Risk Operations",
+        "version": "2.0.0",
         "docs": "/docs",
-        "status": "Running"
+        "status": "Operational"
     }
