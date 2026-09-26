@@ -3,266 +3,391 @@ import random
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy import delete
 from app.config import settings
 from app.database import Base, SessionLocal
 from app.models.user import User
 from app.models.transaction import Transaction
+from app.models.case import Case, CaseAuditLog, AgentInvestigationRun, CaseStatus, RiskLevel
 from app.services.auth_service import get_password_hash
 from app.services.fraud_detector import fraud_detector, MODEL_PATH
 
-# Seed data categories & merchants
-CATEGORIES = {
-    "Groceries": ["Walmart", "Safeway", "Kroger", "Whole Foods", "Trader Joe's"],
-    "Dining Out": ["McDonalds", "Starbucks", "Subway", "Chipotle", "Olive Garden", "Local Diner"],
-    "Utilities": ["Electric Corp", "Water District", "Comcast Cable", "AT&T Mobile", "Clean Garbage"],
-    "Rent/Mortgage": ["Property Management", "Home Loans LLC"],
-    "Entertainment": ["Netflix", "Spotify", "AMC Theatres", "Steam Games", "Ticketmaster"],
-    "Shopping": ["Amazon", "Target", "Best Buy", "Macy's", "Nike Store"],
-    "Travel": ["Delta Airlines", "Uber", "Airbnb", "Shell Gas", "Hilton Hotels"],
-    "Wire Transfer": ["Western Union", "Wire Transfer Dept"],
-    "Investment": ["Vanguard Group", "Fidelity Investments", "Robinhood"],
-    "Salary": ["Tech Corp Payroll"]
+# Seed data categories, merchants & MCC codes
+MERCHANT_PROFILES = {
+    "Groceries": [
+        ("Walmart", "5411", True), ("Safeway", "5411", True), ("Kroger", "5411", True),
+        ("Whole Foods", "5411", True), ("Trader Joe's", "5411", True)
+    ],
+    "Dining Out": [
+        ("McDonalds", "5814", True), ("Starbucks", "5814", True), ("Subway", "5814", True),
+        ("Chipotle", "5814", True), ("Olive Garden", "5814", True)
+    ],
+    "Utilities": [
+        ("Electric Corp", "4899", True), ("Water District", "4899", True),
+        ("Comcast Cable", "4899", True), ("AT&T Mobile", "4899", True)
+    ],
+    "Rent/Mortgage": [
+        ("Property Management LLC", "6513", True), ("Home Loans Direct", "6513", True)
+    ],
+    "Entertainment": [
+        ("Netflix", "7832", True), ("Spotify", "7832", True), ("AMC Theatres", "7832", True),
+        ("Steam Games", "7832", True)
+    ],
+    "Shopping": [
+        ("Amazon", "5311", True), ("Target", "5311", True), ("Best Buy", "5311", True),
+        ("Nike Store", "5311", True), ("Global Luxury Outlet", "5999", False)
+    ],
+    "Travel": [
+        ("Delta Airlines", "4121", True), ("Uber", "4121", True), ("Airbnb", "4121", True),
+        ("Shell Gas", "5999", True), ("Express Flight Bookers", "5999", False)
+    ],
+    "Wire Transfer": [
+        ("Western Union", "6012", True), ("FastRemit Global", "6012", False),
+        ("Offshore Settlement Dept", "0000", False)
+    ],
+    "Investment": [
+        ("Vanguard Group", "6012", True), ("Fidelity Investments", "6012", True),
+        ("CryptoFast Exchange", "6051", False)
+    ],
+    "Gambling": [
+        ("Vegas Bet Portal", "7995", False), ("Royal Jackpot Casino", "7995", False)
+    ]
 }
 
-async def generate_transactions(user_id: int):
-    print("Generating 10,000+ synthetic transactions...")
-    txs = []
-    
-    # Run dates over the last 500 days
-    start_date = datetime.now(timezone.utc) - timedelta(days=500)
-    current_time = start_date
-    
-    # Keep track of months for salary & rent
-    months_seen = set()
-    
-    # 10,000 transactions over 500 days is ~20 transactions per day
-    while current_time < datetime.now(timezone.utc):
-        month_str = current_time.strftime("%Y-%m")
-        
-        # 1. Monthly Salary (Income)
-        if month_str not in months_seen and current_time.day == 1:
-            txs.append({
-                "amount": 5500.0,
-                "category": "Salary",
-                "merchant": "Tech Corp Payroll",
-                "description": "Monthly Net Salary Credit",
-                "transaction_date": current_time.replace(hour=9, minute=0, second=0)
-            })
-            
-            # 2. Monthly Rent (Expense)
-            txs.append({
-                "amount": 1600.0,
-                "category": "Rent/Mortgage",
-                "merchant": "Property Management",
-                "description": "Monthly Apartment Rent Payment",
-                "transaction_date": current_time.replace(hour=10, minute=30, second=0)
-            })
-            months_seen.add(month_str)
-            
-        # Daily transaction loop (generate random daily transactions: 15 to 25 per day)
-        daily_count = random.randint(15, 25)
-        for _ in range(daily_count):
-            # Select random category and merchant
-            cat = random.choice([c for c in CATEGORIES.keys() if c not in ["Salary", "Rent/Mortgage"]])
-            merchant = random.choice(CATEGORIES[cat])
-            
-            # Generate random time of day (normally during daytime 7 AM to 11 PM)
-            hour = random.randint(7, 23)
-            minute = random.randint(0, 59)
-            tx_time = current_time.replace(hour=hour, minute=minute)
-            
-            # Base amounts based on category
-            if cat == "Groceries":
-                amount = round(random.uniform(30.0, 150.0), 2)
-            elif cat == "Dining Out":
-                amount = round(random.uniform(5.0, 60.0), 2)
-            elif cat == "Utilities":
-                # Utilities happen once a month per merchant, simulate randomly
-                if random.random() < 0.1:
-                    amount = round(random.uniform(40.0, 120.0), 2)
-                else:
-                    continue
-            elif cat == "Entertainment":
-                amount = round(random.uniform(9.0, 50.0), 2)
-            elif cat == "Shopping":
-                amount = round(random.uniform(15.0, 250.0), 2)
-            elif cat == "Travel":
-                amount = round(random.uniform(10.0, 400.0), 2)
-            elif cat == "Wire Transfer":
-                # Rare
-                if random.random() < 0.02:
-                    amount = round(random.uniform(100.0, 800.0), 2)
-                else:
-                    continue
-            elif cat == "Investment":
-                if random.random() < 0.05:
-                    amount = round(random.uniform(100.0, 500.0), 2)
-                else:
-                    continue
-            else:
-                amount = round(random.uniform(5.0, 100.0), 2)
-                
-            txs.append({
-                "amount": amount,
-                "category": cat,
-                "merchant": merchant,
-                "description": f"Purchase at {merchant}",
-                "transaction_date": tx_time
-            })
-            
-        current_time += timedelta(days=1)
+DEVICES = [
+    "DEV-APPLE-9921",
+    "DEV-ANDROID-4102",
+    "DEV-WORKSTATION-01",
+    "DEV-TOR-PROXY-77",
+    "DEV-SAMSUNG-1092"
+]
 
-    # 3. Add explicit anomalies (fraudulent transactions) - about 7.5% of total
-    print(f"Base transactions generated: {len(txs)}")
-    total_tx_count = len(txs)
-    anomaly_count = int(total_tx_count * 0.075)
-    print(f"Injecting {anomaly_count} anomalous transactions (approx 7.5%)...")
-    
-    # We will randomly distribute anomalies
-    for _ in range(anomaly_count):
-        # Choose a random index
-        idx = random.randint(0, len(txs) - 1)
-        base_date = txs[idx]["transaction_date"]
-        
-        # Anomaly types:
-        anomaly_type = random.choice(["high_amount", "odd_hour", "risky_wire", "high_risk_shopping"])
-        
-        if anomaly_type == "high_amount":
-            # Extremely high amount for category
-            cat = random.choice(["Shopping", "Dining Out", "Entertainment"])
-            merchant = random.choice(CATEGORIES[cat])
-            amount = round(random.uniform(2500.0, 8500.0), 2)
-            hour = random.randint(9, 21)
-            desc = "Suspicious High-Value Purchase"
-            
-        elif anomaly_type == "odd_hour":
-            # High amount at 3-5 AM
-            cat = random.choice(["Shopping", "Travel", "Wire Transfer"])
-            merchant = random.choice(CATEGORIES[cat])
-            amount = round(random.uniform(800.0, 3000.0), 2)
-            hour = random.randint(2, 4)
-            desc = "Off-hours Electronic Settlement"
-            
-        elif anomaly_type == "risky_wire":
-            # Out-of-profile wire transfer
-            cat = "Wire Transfer"
-            merchant = "Western Union"
-            amount = round(random.uniform(4000.0, 9500.0), 2)
-            hour = random.randint(10, 16)
-            desc = "International Fund Remittance"
-            
-        else: # high_risk_shopping
-            # Fast consecutive transactions or high value categories
-            cat = "Travel"
-            merchant = "Unknown Agent Services"
-            amount = round(random.uniform(3500.0, 7500.0), 2)
-            hour = random.randint(1, 5)
-            desc = "Urgent Travel Booking Agency"
-            
-        txs.append({
-            "amount": amount,
-            "category": cat,
-            "merchant": merchant,
-            "description": desc,
-            "transaction_date": base_date.replace(hour=hour, minute=random.randint(0,59))
-        })
-        
-    return txs
+LOCATIONS = [
+    "San Francisco, CA, US",
+    "San Jose, CA, US",
+    "New York, NY, US",
+    "Seattle, WA, US",
+    "Bucharest, RO [High-risk Proxy]",
+    "Lagos, NG [Unrecognized Locale]"
+]
 
 async def seed_all(db: AsyncSession):
-    # 1. Create demo user if not exists
+    print("Verifying FinSight AI synthetic risk operations dataset...")
+
+    # 1. Create or verify primary demo user
     email = "demo@finsight.ai"
     result = await db.execute(select(User).filter(User.email == email))
     demo_user = result.scalars().first()
-    
-    if demo_user:
-        demo_user.is_admin = True
-        demo_user.monthly_income = 5000.0
-        await db.commit()
-        print("Demo user already exists. Checking transaction counts...")
-        tx_count_result = await db.execute(select(Transaction).where(Transaction.user_id == demo_user.id))
-        count = len(tx_count_result.scalars().all())
-        if count >= 10000:
-            print(f"Demo database already seeded with {count} transactions.")
-            return
-        else:
-            print(f"Clearing old transactions ({count}) and re-seeding...")
-            # Clear old transactions
-            await db.execute(select(Transaction).where(Transaction.user_id == demo_user.id))
-            # Delete statement
-            from sqlalchemy import delete
-            await db.execute(delete(Transaction).where(Transaction.user_id == demo_user.id))
-            await db.commit()
-    else:
-        print("Creating demo user...")
+
+    if not demo_user:
+        print("Creating demo investigator user (demo@finsight.ai)...")
         demo_user = User(
             email=email,
-            full_name="Demo User (Admin)",
+            full_name="Alex Mercer (Lead Risk Operator)",
             hashed_password=get_password_hash("password123"),
-            monthly_income=5000.0,
+            monthly_income=450000.0,
             is_admin=True
         )
         db.add(demo_user)
         await db.commit()
         await db.refresh(demo_user)
-        
-    # 2. Generate transactions list
-    raw_txs = await generate_transactions(demo_user.id)
-    
-    # 3. Train Isolation Forest model on raw transactions
-    print("Training Isolation Forest ML model on generated seed dataset...")
-    # Map raw transactions to dict matching model input
-    model_inputs = []
-    for tx in raw_txs:
-        model_inputs.append({
-            "amount": tx["amount"],
-            "category": tx["category"],
-            "merchant": tx["merchant"],
-            "transaction_date": tx["transaction_date"]
-        })
-        
-    fraud_detector.train(model_inputs)
-    print("Isolation Forest trained and saved to pickle.")
-    
-    # 4. Predict fraud scores & labels
-    print("Scoring and labeling transactions...")
-    predictions = fraud_detector.predict(model_inputs)
-    
-    # 5. Insert into DB in chunks
-    print("Saving 10,000+ transactions to database...")
-    batch_size = 1000
-    for i in range(0, len(raw_txs), batch_size):
-        chunk = raw_txs[i:i+batch_size]
-        chunk_preds = predictions[i:i+batch_size]
-        
-        db_items = []
-        for tx, (is_fraud, score) in zip(chunk, chunk_preds):
-            db_items.append(
-                Transaction(
-                    user_id=demo_user.id,
-                    amount=tx["amount"],
-                    category=tx["category"],
-                    merchant=tx["merchant"],
-                    description=tx["description"],
-                    transaction_date=tx["transaction_date"],
-                    is_fraudulent=is_fraud,
-                    fraud_score=score
-                )
-            )
-        db.add_all(db_items)
+    else:
+        demo_user.is_admin = True
+        demo_user.monthly_income = 450000.0
         await db.commit()
-        print(f"Saved {min(i + batch_size, len(raw_txs))} / {len(raw_txs)}...")
+
+    # Check existing case count
+    case_count_res = await db.execute(select(func.count(Case.id)))
+    existing_cases = case_count_res.scalar() or 0
+    if existing_cases >= 15:
+        print(f"Synthetic dataset already initialized with {existing_cases} cases. Ready.")
+        return
+
+    print("Generating comprehensive synthetic transactions & case investigations...")
+    
+    # Generate 500 baseline normal transactions over 90 days
+    base_date = datetime.now(timezone.utc) - timedelta(days=90)
+    tx_list = []
+    
+    for day in range(90):
+        current_day = base_date + timedelta(days=day)
+        # 3-7 normal transactions daily
+        for _ in range(random.randint(3, 7)):
+            cat = random.choice(["Groceries", "Dining Out", "Utilities", "Entertainment", "Shopping", "Travel"])
+            merch_name, mcc, is_ver = random.choice(MERCHANT_PROFILES[cat])
+            
+            amount = round(random.uniform(15.0, 180.0), 2)
+            if cat == "Travel": amount = round(random.uniform(40.0, 350.0), 2)
+            if cat == "Groceries": amount = round(random.uniform(25.0, 120.0), 2)
+            
+            tx_time = current_day.replace(hour=random.randint(8, 22), minute=random.randint(0, 59))
+            tx_list.append({
+                "user_id": demo_user.id,
+                "amount": amount,
+                "category": cat,
+                "merchant": merch_name,
+                "description": f"Standard {cat} spend at {merch_name}",
+                "mcc_code": mcc,
+                "is_merchant_verified": is_ver,
+                "transaction_date": tx_time,
+                "device_id": "DEV-APPLE-9921",
+                "ip_address": "198.51.100.12",
+                "location": "San Francisco, CA, US",
+                "card_last4": "4821",
+                "is_new_device": False,
+                "is_velocity_burst": False
+            })
+
+    # Train Isolation Forest on normal baseline
+    model_train_data = [
+        {"amount": t["amount"], "category": t["category"], "mcc_code": t["mcc_code"], 
+         "is_merchant_verified": t["is_merchant_verified"], "transaction_date": t["transaction_date"]}
+        for t in tx_list
+    ]
+    fraud_detector.train(model_train_data, monthly_income_baseline=demo_user.monthly_income)
+    print("Baseline model trained on normal spending distribution.")
+
+    # Injected Intentionally Structured Fraud Patterns (Section 24)
+    # Pattern 1: High-Value Wire to Unverified Entity from Novel Device
+    anomaly_patterns = [
+        {
+            "amount": 9200.0,
+            "category": "Wire Transfer",
+            "merchant": "Offshore Settlement Dept",
+            "description": "International urgent wire remittance",
+            "mcc_code": "0000",
+            "is_merchant_verified": False,
+            "device_id": "DEV-TOR-PROXY-77",
+            "ip_address": "185.220.101.5",
+            "location": "Bucharest, RO [High-risk Proxy]",
+            "is_new_device": True,
+            "is_velocity_burst": False,
+            "pre_status": CaseStatus.PENDING_HUMAN_DECISION.value,
+            "notes": "Convergence of unassigned MCC 0000, unverified entity, and TOR exit node."
+        },
+        {
+            "amount": 4850.0,
+            "category": "Investment",
+            "merchant": "CryptoFast Exchange",
+            "description": "Digital asset purchase instant credit",
+            "mcc_code": "6051",
+            "is_merchant_verified": False,
+            "device_id": "DEV-ANDROID-4102",
+            "ip_address": "198.51.100.89",
+            "location": "San Jose, CA, US",
+            "is_new_device": True,
+            "is_velocity_burst": False,
+            "pre_status": CaseStatus.AI_REVIEWED.value,
+            "notes": "Crypto liquidation vector on unrecognized mobile device."
+        },
+        {
+            "amount": 3500.0,
+            "category": "Gambling",
+            "merchant": "Vegas Bet Portal",
+            "description": "Online sports wager reload",
+            "mcc_code": "7995",
+            "is_merchant_verified": False,
+            "device_id": "DEV-TOR-PROXY-77",
+            "ip_address": "185.220.101.5",
+            "location": "Bucharest, RO [High-risk Proxy]",
+            "is_new_device": True,
+            "is_velocity_burst": True,
+            "pre_status": CaseStatus.CONFIRMED_FRAUD.value,
+            "notes": "Historical precedent: Confirmed account takeover with wagering balance drain."
+        },
+        {
+            "amount": 6500.0,
+            "category": "Shopping",
+            "merchant": "Global Luxury Outlet",
+            "description": "High ticket jewelry purchase",
+            "mcc_code": "5999",
+            "is_merchant_verified": False,
+            "device_id": "DEV-SAMSUNG-1092",
+            "ip_address": "198.51.100.99",
+            "location": "Lagos, NG [Unrecognized Locale]",
+            "is_new_device": True,
+            "is_velocity_burst": True,
+            "pre_status": CaseStatus.NEW.value,
+            "notes": "Rapid spending burst at unverified retail outlet."
+        },
+        {
+            "amount": 2100.0,
+            "category": "Travel",
+            "merchant": "Delta Airlines",
+            "description": "Family vacation airfare booking",
+            "mcc_code": "4121",
+            "is_merchant_verified": True,
+            "device_id": "DEV-APPLE-9921",
+            "ip_address": "198.51.100.12",
+            "location": "San Francisco, CA, US",
+            "is_new_device": False,
+            "is_velocity_burst": False,
+            "pre_status": CaseStatus.FALSE_POSITIVE.value,
+            "notes": "Legitimate verified merchant airline purchase during holiday period."
+        },
+        {
+            "amount": 4200.0,
+            "category": "Wire Transfer",
+            "merchant": "FastRemit Global",
+            "description": "Emergency remittance transfer",
+            "mcc_code": "6012",
+            "is_merchant_verified": False,
+            "device_id": "DEV-ANDROID-4102",
+            "ip_address": "198.51.100.89",
+            "location": "San Jose, CA, US",
+            "is_new_device": True,
+            "is_velocity_burst": False,
+            "pre_status": CaseStatus.ESCALATED.value,
+            "notes": "Tier 2 investigation required: Customer outbound contact pending."
+        },
+        {
+            "amount": 1500.0,
+            "category": "Shopping",
+            "merchant": "Apple",
+            "description": "Hardware replacement purchase",
+            "mcc_code": "5311",
+            "is_merchant_verified": True,
+            "device_id": "DEV-APPLE-9921",
+            "ip_address": "198.51.100.12",
+            "location": "San Francisco, CA, US",
+            "is_new_device": False,
+            "is_velocity_burst": False,
+            "pre_status": CaseStatus.FALSE_POSITIVE.value,
+            "notes": "Verified merchant entity with zero suspicious linkage."
+        },
+        {
+            "amount": 7800.0,
+            "category": "Wire Transfer",
+            "merchant": "Offshore Settlement Dept",
+            "description": "Commercial invoice payment",
+            "mcc_code": "0000",
+            "is_merchant_verified": False,
+            "device_id": "DEV-TOR-PROXY-77",
+            "ip_address": "185.220.101.5",
+            "location": "Bucharest, RO [High-risk Proxy]",
+            "is_new_device": True,
+            "is_velocity_burst": True,
+            "pre_status": CaseStatus.CONFIRMED_FRAUD.value,
+            "notes": "Cluster collision: shared TOR IP across multiple fraudulent wire attempts."
+        }
+    ]
+
+    # Insert baseline transactions
+    db_items = []
+    for t in tx_list:
+        db_items.append(
+            Transaction(
+                user_id=t["user_id"],
+                amount=t["amount"],
+                category=t["category"],
+                merchant=t["merchant"],
+                description=t["description"],
+                mcc_code=t["mcc_code"],
+                is_merchant_verified=t["is_merchant_verified"],
+                transaction_date=t["transaction_date"],
+                device_id=t["device_id"],
+                ip_address=t["ip_address"],
+                location=t["location"],
+                card_last4=t["card_last4"],
+                is_fraudulent=0,
+                fraud_score=random.uniform(2.0, 18.0)
+            )
+        )
+    db.add_all(db_items)
+    await db.commit()
+
+    # Insert anomaly transactions and corresponding Cases
+    now = datetime.now(timezone.utc)
+    for idx, p in enumerate(anomaly_patterns):
+        tx_time = now - timedelta(hours=random.randint(1, 72))
+        calc = fraud_detector.calculate_structured_risk(p, monthly_income_baseline=demo_user.monthly_income)
         
-    print("Database seeding completed successfully!")
+        tx = Transaction(
+            user_id=demo_user.id,
+            amount=p["amount"],
+            category=p["category"],
+            merchant=p["merchant"],
+            description=p["description"],
+            mcc_code=p["mcc_code"],
+            is_merchant_verified=p["is_merchant_verified"],
+            transaction_date=tx_time,
+            device_id=p["device_id"],
+            ip_address=p["ip_address"],
+            location=p["location"],
+            card_last4="4821",
+            is_fraudulent=1,
+            fraud_score=calc["score"]
+        )
+        db.add(tx)
+        await db.commit()
+        await db.refresh(tx)
+
+        case_num = f"CASE-{1000 + tx.id}"
+        case = Case(
+            case_number=case_num,
+            transaction_id=tx.id,
+            user_id=demo_user.id,
+            status=p["pre_status"],
+            risk_score=calc["score"],
+            risk_level=calc["risk_level"],
+            risk_factors=calc["risk_factors"],
+            ai_recommendation="CONFIRM_FRAUD" if calc["score"] >= 75.0 else ("ESCALATE" if calc["score"] >= 50.0 else "FALSE_POSITIVE"),
+            ai_confidence=0.91 if calc["score"] >= 75.0 else 0.82,
+            ai_reasoning_summary=f"Automated risk synthesis: {len(calc['risk_factors'])} risk factors observed. {p['notes']}",
+            ai_investigated_at=tx_time + timedelta(minutes=2),
+            human_decision=p["pre_status"] if p["pre_status"] in [CaseStatus.CONFIRMED_FRAUD.value, CaseStatus.FALSE_POSITIVE.value] else None,
+            human_notes=p["notes"] if p["pre_status"] in [CaseStatus.CONFIRMED_FRAUD.value, CaseStatus.FALSE_POSITIVE.value] else None,
+            decided_by="senior_investigator@bank.internal" if p["pre_status"] in [CaseStatus.CONFIRMED_FRAUD.value, CaseStatus.FALSE_POSITIVE.value] else None,
+            decided_at=tx_time + timedelta(minutes=15) if p["pre_status"] in [CaseStatus.CONFIRMED_FRAUD.value, CaseStatus.FALSE_POSITIVE.value] else None
+        )
+        db.add(case)
+        await db.commit()
+        await db.refresh(case)
+
+        # Audit timeline creation
+        log_create = CaseAuditLog(
+            case_id=case.id,
+            actor="RISK_ENGINE",
+            actor_id="FinSight-RulesEngine-v2",
+            action="CASE_CREATED",
+            details=f"Alert triggered with composite risk score of {calc['score']}/100 ({calc['risk_level']}). Case {case_num} opened.",
+            event_metadata={"risk_factors": calc["risk_factors"]},
+            timestamp=tx_time
+        )
+        db.add(log_create)
+
+        log_ai = CaseAuditLog(
+            case_id=case.id,
+            actor="AI_AGENT",
+            actor_id="FinSight-InvestigationAgent-v2.1",
+            action="AI_INVESTIGATION_COMPLETED",
+            details=f"Agent completed multi-tool evaluation. Recommendation: {case.ai_recommendation}. Latency: 142ms.",
+            event_metadata={"recommendation": case.ai_recommendation},
+            timestamp=tx_time + timedelta(minutes=2)
+        )
+        db.add(log_ai)
+
+        if case.human_decision:
+            log_human = CaseAuditLog(
+                case_id=case.id,
+                actor="INVESTIGATOR",
+                actor_id=case.decided_by,
+                action="HUMAN_DECISION_RECORDED",
+                details=f"Final human adjudication: [{case.human_decision}]. Notes: {case.human_notes}",
+                event_metadata={"decision": case.human_decision},
+                timestamp=case.decided_at
+            )
+            db.add(log_human)
+
+        await db.commit()
+
+    print("FinSight AI synthetic risk operations dataset seeded successfully!")
 
 if __name__ == "__main__":
     from app.database import engine
-    
     async def main():
         async with SessionLocal() as db:
-            # Create tables
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
             await seed_all(db)
-            
     asyncio.run(main())
