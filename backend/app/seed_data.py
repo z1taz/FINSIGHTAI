@@ -3,7 +3,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.future import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy import delete
+from sqlalchemy import delete, func
 from app.config import settings
 from app.database import Base, SessionLocal
 from app.models.user import User
