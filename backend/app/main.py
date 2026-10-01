@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from sqlalchemy.future import select
 from app.config import settings
 from app.database import engine, Base, SessionLocal
@@ -8,6 +9,45 @@ from app.seed_data import seed_all
 # Import all models to ensure metadata registration
 from app.models import User, Transaction, Case, CaseAuditLog, AgentInvestigationRun
 import asyncio
+
+
+# ---------------------------------------------------------------------------
+# Inline schema migrations
+# Runs ADD COLUMN IF NOT EXISTS for every column added after the initial
+# deploy. Safe to run on every startup — completely idempotent.
+# ---------------------------------------------------------------------------
+_MIGRATIONS = [
+    # transactions table — redesign columns
+    "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS device_id VARCHAR(64)",
+    "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS ip_address VARCHAR(64)",
+    "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS location VARCHAR(128)",
+    "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS card_last4 VARCHAR(4) DEFAULT '4821'",
+    # Create indexes only if they don't exist (PostgreSQL 9.5+)
+    "CREATE INDEX IF NOT EXISTS idx_device_tx ON transactions (device_id, transaction_date)",
+    "CREATE INDEX IF NOT EXISTS idx_ip_tx ON transactions (ip_address, transaction_date)",
+    "CREATE INDEX IF NOT EXISTS idx_merchant_tx ON transactions (merchant, transaction_date)",
+    "CREATE INDEX IF NOT EXISTS idx_user_date_category ON transactions (user_id, transaction_date, category)",
+    "CREATE INDEX IF NOT EXISTS idx_user_amount ON transactions (user_id, amount)",
+    # cases table — all AI/decision columns
+    "ALTER TABLE cases ADD COLUMN IF NOT EXISTS risk_factors JSON DEFAULT '[]'",
+    "ALTER TABLE cases ADD COLUMN IF NOT EXISTS ai_recommendation VARCHAR(64)",
+    "ALTER TABLE cases ADD COLUMN IF NOT EXISTS ai_confidence FLOAT",
+    "ALTER TABLE cases ADD COLUMN IF NOT EXISTS ai_reasoning_summary TEXT",
+    "ALTER TABLE cases ADD COLUMN IF NOT EXISTS ai_investigated_at TIMESTAMPTZ",
+    "ALTER TABLE cases ADD COLUMN IF NOT EXISTS human_decision VARCHAR(64)",
+    "ALTER TABLE cases ADD COLUMN IF NOT EXISTS human_notes TEXT",
+    "ALTER TABLE cases ADD COLUMN IF NOT EXISTS decided_by VARCHAR(128)",
+    "ALTER TABLE cases ADD COLUMN IF NOT EXISTS decided_at TIMESTAMPTZ",
+]
+
+async def run_migrations(conn) -> None:
+    """Apply all pending schema migrations idempotently."""
+    for sql in _MIGRATIONS:
+        try:
+            await conn.execute(text(sql))
+        except Exception as e:
+            # Log but don't crash — index-already-exists errors are harmless
+            print(f"[migration] skipped ({type(e).__name__}): {sql[:80]}")
 
 app = FastAPI(
     title="FinSight AI Risk Operations API",
@@ -47,8 +87,11 @@ async def startup_event():
             print(f"Verifying database tables... (attempt {attempt}/{max_retries})")
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+                # 2. Apply incremental column migrations for existing tables
+                print("Applying schema migrations...")
+                await run_migrations(conn)
                 
-            # 2. Run seed process
+            # 3. Run seed process
             print("Checking database seed status...")
             async with SessionLocal() as db:
                 await seed_all(db)
