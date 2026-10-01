@@ -18,9 +18,19 @@ class Transaction(Base):
     is_fraudulent = Column(Integer, default=0, nullable=False) # 0 = normal, 1 = flagged anomaly
     fraud_score = Column(Float, default=0.0, nullable=False)
 
-    user = relationship("User", backref="transactions")
+    # Enriched entity & network intelligence signals
+    device_id = Column(String(64), nullable=True, index=True)
+    ip_address = Column(String(64), nullable=True, index=True)
+    location = Column(String(128), nullable=True)
+    card_last4 = Column(String(4), default="4821", nullable=True)
 
-# Compound indexes to optimize filtered searches (reducing query time by 40%+)
+    # Relationships
+    user = relationship("User", backref="transactions")
+    case = relationship("Case", back_populates="transaction", uselist=False, cascade="all, delete-orphan")
+
+# Compound indexes to optimize filtered searches and graph aggregations
 Index("idx_user_date_category", Transaction.user_id, Transaction.transaction_date, Transaction.category)
 Index("idx_user_amount", Transaction.user_id, Transaction.amount)
-
+Index("idx_device_tx", Transaction.device_id, Transaction.transaction_date)
+Index("idx_ip_tx", Transaction.ip_address, Transaction.transaction_date)
+Index("idx_merchant_tx", Transaction.merchant, Transaction.transaction_date)
