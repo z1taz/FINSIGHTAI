@@ -27,7 +27,6 @@ api.interceptors.response.use(
   (error) => {
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('token');
-      // If we are not on login/signup, redirect to login
       if (!window.location.pathname.includes('/login') && !window.location.pathname.includes('/signup')) {
         window.location.href = '/login';
       }
@@ -39,7 +38,7 @@ api.interceptors.response.use(
 export const authAPI = {
   login: async (email, password) => {
     const params = new URLSearchParams();
-    params.append('username', email); // OAuth2PasswordRequestForm uses 'username'
+    params.append('username', email);
     params.append('password', password);
     
     const response = await api.post('/auth/login', params, {
@@ -66,6 +65,91 @@ export const authAPI = {
 
   updateProfile: async (data) => {
     const response = await api.put('/auth/profile', data);
+    return response.data;
+  },
+};
+
+export const casesAPI = {
+  listCases: async (params = {}) => {
+    const response = await api.get('/cases', { params });
+    return response.data;
+  },
+
+  getStats: async () => {
+    const response = await api.get('/cases/stats/overview');
+    return response.data;
+  },
+
+  getCaseDetail: async (caseId) => {
+    const response = await api.get(`/cases/${caseId}`);
+    return response.data;
+  },
+
+  triggerInvestigation: async (caseId) => {
+    const response = await api.post(`/cases/${caseId}/investigate`);
+    return response.data;
+  },
+
+  submitDecision: async (caseId, decision, notes = '') => {
+    const response = await api.post(`/cases/${caseId}/decide`, { decision, notes });
+    return response.data;
+  },
+
+  getAuditTrail: async (caseId) => {
+    const response = await api.get(`/cases/${caseId}/audit-trail`);
+    return response.data;
+  },
+};
+
+export const networkAPI = {
+  getGraph: async (limit = 60) => {
+    const response = await api.get('/network/graph', { params: { limit } });
+    return response.data;
+  },
+
+  getClusters: async () => {
+    const response = await api.get('/network/clusters');
+    return response.data;
+  },
+};
+
+export const policiesAPI = {
+  getAll: async () => {
+    const response = await api.get('/policies');
+    return response.data;
+  },
+
+  simulate: async (data) => {
+    const response = await api.post('/policies/simulate', data);
+    return response.data;
+  },
+};
+
+export const governanceAPI = {
+  getModels: async () => {
+    const response = await api.get('/governance/models');
+    return response.data;
+  },
+
+  getVersions: async () => {
+    const response = await api.get('/governance/versions');
+    return response.data;
+  },
+
+  getProductMetrics: async () => {
+    const response = await api.get('/governance/product-metrics');
+    return response.data;
+  },
+};
+
+export const evaluationAPI = {
+  getResults: async () => {
+    const response = await api.get('/evaluation/results');
+    return response.data;
+  },
+
+  runBenchmark: async () => {
+    const response = await api.post('/evaluation/run');
     return response.data;
   },
 };
@@ -131,4 +215,3 @@ export const analyticsAPI = {
 };
 
 export default api;
-
