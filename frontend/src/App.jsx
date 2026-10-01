@@ -5,20 +5,27 @@ import Dashboard from './pages/Dashboard';
 import Transactions from './pages/Transactions';
 import Anomalies from './pages/Anomalies';
 import AdminPortal from './pages/AdminPortal';
+import CasesQueue from './pages/CasesQueue';
+import CaseInvestigation from './pages/CaseInvestigation';
+import NetworkIntelligence from './pages/NetworkIntelligence';
+import PolicySimulation from './pages/PolicySimulation';
+import EvaluationDashboard from './pages/EvaluationDashboard';
+import ModelGovernance from './pages/ModelGovernance';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import { authAPI } from './services/api';
 import { CURRENCIES, formatCurrency } from './utils/currency';
 import { 
   TrendingUp, LayoutDashboard, CreditCard, ShieldAlert, 
-  LogOut, User as UserIcon, RefreshCw, ShieldCheck, DollarSign, Edit3, X
+  LogOut, User as UserIcon, RefreshCw, ShieldCheck, DollarSign, Edit3, X,
+  Briefcase, Layers, Sliders, Activity
 } from 'lucide-react';
 
 // Protected Layout component that embeds Sidebar and Navbar Header
 function ProtectedLayout({ children, user, handleLogout, currency, setCurrency, onUserUpdated }) {
   const location = useLocation();
   const [showIncomeModal, setShowIncomeModal] = useState(false);
-  const [newIncome, setNewIncome] = useState(user?.monthly_income || 5000);
+  const [newIncome, setNewIncome] = useState(user?.monthly_income || 400000);
   const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
@@ -41,6 +48,8 @@ function ProtectedLayout({ children, user, handleLogout, currency, setCurrency, 
     }
   };
 
+  const isCasesActive = location.pathname.startsWith('/cases');
+
   return (
     <div className="app-container">
       {/* Sidebar Navigation */}
@@ -51,16 +60,68 @@ function ProtectedLayout({ children, user, handleLogout, currency, setCurrency, 
         </div>
 
         <nav style={styles.navMenu}>
+          {/* Primary Risk Operations Workflow: Cases */}
           <Link 
-            to="/" 
+            to="/cases" 
             style={{
               ...styles.navLink,
-              ...(location.pathname === '/' ? styles.navLinkActive : {})
+              ...(isCasesActive ? styles.navLinkActiveCases : styles.casesNavLink)
             }}
           >
-            <LayoutDashboard size={18} />
-            <span>Dashboard</span>
+            <Briefcase size={18} color={isCasesActive ? '#10b981' : '#34d399'} />
+            <span style={{ fontWeight: '700' }}>Cases Queue</span>
+            <span style={styles.queueTag}>Active</span>
           </Link>
+
+          {/* Network Intelligence */}
+          <Link 
+            to="/network" 
+            style={{
+              ...styles.navLink,
+              ...(location.pathname === '/network' ? styles.navLinkActive : {})
+            }}
+          >
+            <Layers size={18} />
+            <span>Network Graph</span>
+          </Link>
+
+          {/* Policy Simulation */}
+          <Link 
+            to="/policies" 
+            style={{
+              ...styles.navLink,
+              ...(location.pathname === '/policies' ? styles.navLinkActive : {})
+            }}
+          >
+            <Sliders size={18} />
+            <span>Policy Simulation</span>
+          </Link>
+
+          {/* Evaluation Suite */}
+          <Link 
+            to="/evaluation" 
+            style={{
+              ...styles.navLink,
+              ...(location.pathname === '/evaluation' ? styles.navLinkActive : {})
+            }}
+          >
+            <Activity size={18} />
+            <span>Evaluation Suite</span>
+          </Link>
+
+          {/* Model Governance */}
+          <Link 
+            to="/governance" 
+            style={{
+              ...styles.navLink,
+              ...(location.pathname === '/governance' ? styles.navLinkActive : {})
+            }}
+          >
+            <ShieldCheck size={18} />
+            <span>AI Governance</span>
+          </Link>
+
+          <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '0.4rem 0' }}></div>
 
           <Link 
             to="/transactions" 
@@ -74,17 +135,17 @@ function ProtectedLayout({ children, user, handleLogout, currency, setCurrency, 
           </Link>
 
           <Link 
-            to="/anomalies" 
+            to="/" 
             style={{
               ...styles.navLink,
-              ...(location.pathname === '/anomalies' ? styles.navLinkActive : {})
+              ...(location.pathname === '/' ? styles.navLinkActive : {})
             }}
           >
-            <ShieldAlert size={18} />
-            <span>Threat Intelligence</span>
+            <LayoutDashboard size={18} />
+            <span>Analytics Dashboard</span>
           </Link>
 
-          {/* Admin Navigation (Only visible for Admins / Creator) */}
+          {/* Admin Navigation */}
           {user?.is_admin && (
             <Link 
               to="/admin" 
@@ -125,14 +186,16 @@ function ProtectedLayout({ children, user, handleLogout, currency, setCurrency, 
         <header style={styles.topHeader}>
           <div style={styles.topHeaderLeft}>
             <span style={styles.statusIndicator}></span>
-            <span style={{ fontSize: '0.85rem', color: '#9ca3af' }}>Live AI Engine Connected</span>
+            <span style={{ fontSize: '0.85rem', color: '#9ca3af', fontWeight: '500' }}>
+              FinSight AI Risk Operations Workstation
+            </span>
           </div>
 
           <div style={styles.topHeaderRight}>
             {/* Monthly Income Button */}
-            <button onClick={() => setShowIncomeModal(true)} style={styles.incomeBtn} title="Set Monthly Income">
+            <button onClick={() => setShowIncomeModal(true)} style={styles.incomeBtn} title="Set Baseline Monthly Income">
               <span style={{ color: '#10b981', fontWeight: 'bold' }}>₹</span>
-              <span>Income: {formatCurrency(user?.monthly_income || 400000, currency)}</span>
+              <span>Baseline: {formatCurrency(user?.monthly_income || 400000, currency)}</span>
               <Edit3 size={12} color="#9ca3af" />
             </button>
 
@@ -164,7 +227,7 @@ function ProtectedLayout({ children, user, handleLogout, currency, setCurrency, 
         <div style={styles.modalOverlay}>
           <div style={styles.modalContent}>
             <div style={styles.modalHeader}>
-              <h3 style={styles.modalTitle}>Set Monthly Income</h3>
+              <h3 style={styles.modalTitle}>Set Monthly Income Baseline</h3>
               <button onClick={() => setShowIncomeModal(false)} style={styles.closeBtn}>
                 <X size={18} />
               </button>
@@ -182,14 +245,14 @@ function ProtectedLayout({ children, user, handleLogout, currency, setCurrency, 
                 required
               />
               <p style={styles.helpText}>
-                Your monthly income in INR (₹) is used to calculate budget usage and AI risk metrics.
+                The income baseline is evaluated by the risk engine to calculate income-ratio thresholds (INC-04) and out-of-profile spend deviations.
               </p>
               <div style={styles.modalActions}>
                 <button type="button" onClick={() => setShowIncomeModal(false)} style={styles.cancelBtn}>
                   Cancel
                 </button>
                 <button type="submit" disabled={updating} style={styles.saveBtn}>
-                  {updating ? 'Saving...' : 'Save Income'}
+                  {updating ? 'Saving...' : 'Save Baseline'}
                 </button>
               </div>
             </form>
@@ -209,7 +272,7 @@ function RequireAuth({ children, user, loading, handleLogout, currency, setCurre
     return (
       <div style={styles.loadingScreen}>
         <RefreshCw className="animate-spin" size={32} color="#10b981" />
-        <span style={{ marginTop: '1rem', color: '#9ca3af' }}>Syncing telemetry...</span>
+        <span style={{ marginTop: '1rem', color: '#9ca3af' }}>Syncing risk telemetry...</span>
       </div>
     );
   }
@@ -274,8 +337,9 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<Signup />} />
         
+        {/* Cases Queue (Primary Operations Screen) */}
         <Route 
-          path="/" 
+          path="/cases" 
           element={
             <RequireAuth 
               user={user} 
@@ -285,10 +349,97 @@ export default function App() {
               setCurrency={setCurrency}
               onUserUpdated={(updated) => setUser(updated)}
             >
-              <Dashboard currency={currency} user={user} />
+              <CasesQueue currency={currency} />
             </RequireAuth>
           } 
         />
+
+        {/* Case Investigation Workstation */}
+        <Route 
+          path="/cases/:id" 
+          element={
+            <RequireAuth 
+              user={user} 
+              loading={loading} 
+              handleLogout={handleLogout}
+              currency={currency}
+              setCurrency={setCurrency}
+              onUserUpdated={(updated) => setUser(updated)}
+            >
+              <CaseInvestigation currency={currency} />
+            </RequireAuth>
+          } 
+        />
+
+        {/* Network Intelligence */}
+        <Route 
+          path="/network" 
+          element={
+            <RequireAuth 
+              user={user} 
+              loading={loading} 
+              handleLogout={handleLogout}
+              currency={currency}
+              setCurrency={setCurrency}
+              onUserUpdated={(updated) => setUser(updated)}
+            >
+              <NetworkIntelligence />
+            </RequireAuth>
+          } 
+        />
+
+        {/* Policy Simulation */}
+        <Route 
+          path="/policies" 
+          element={
+            <RequireAuth 
+              user={user} 
+              loading={loading} 
+              handleLogout={handleLogout}
+              currency={currency}
+              setCurrency={setCurrency}
+              onUserUpdated={(updated) => setUser(updated)}
+            >
+              <PolicySimulation currency={currency} />
+            </RequireAuth>
+          } 
+        />
+
+        {/* Evaluation Suite */}
+        <Route 
+          path="/evaluation" 
+          element={
+            <RequireAuth 
+              user={user} 
+              loading={loading} 
+              handleLogout={handleLogout}
+              currency={currency}
+              setCurrency={setCurrency}
+              onUserUpdated={(updated) => setUser(updated)}
+            >
+              <EvaluationDashboard />
+            </RequireAuth>
+          } 
+        />
+
+        {/* Model Governance */}
+        <Route 
+          path="/governance" 
+          element={
+            <RequireAuth 
+              user={user} 
+              loading={loading} 
+              handleLogout={handleLogout}
+              currency={currency}
+              setCurrency={setCurrency}
+              onUserUpdated={(updated) => setUser(updated)}
+            >
+              <ModelGovernance />
+            </RequireAuth>
+          } 
+        />
+
+        {/* Transactions */}
         <Route 
           path="/transactions" 
           element={
@@ -304,6 +455,25 @@ export default function App() {
             </RequireAuth>
           } 
         />
+
+        {/* Dashboard */}
+        <Route 
+          path="/" 
+          element={
+            <RequireAuth 
+              user={user} 
+              loading={loading} 
+              handleLogout={handleLogout}
+              currency={currency}
+              setCurrency={setCurrency}
+              onUserUpdated={(updated) => setUser(updated)}
+            >
+              <Dashboard currency={currency} user={user} />
+            </RequireAuth>
+          } 
+        />
+
+        {/* Threat Intelligence */}
         <Route 
           path="/anomalies" 
           element={
@@ -319,6 +489,8 @@ export default function App() {
             </RequireAuth>
           } 
         />
+
+        {/* Admin Portal */}
         <Route 
           path="/admin" 
           element={
@@ -335,13 +507,12 @@ export default function App() {
           } 
         />
         
-        {/* Redirect everything else */}
-        <Route path="*" element={<Navigate to="/" replace />} />
+        {/* Redirect everything else to /cases */}
+        <Route path="*" element={<Navigate to="/cases" replace />} />
       </Routes>
     </Router>
   );
 }
-
 
 const styles = {
   loadingScreen: {
@@ -369,7 +540,7 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '0.75rem',
-    marginBottom: '2.5rem',
+    marginBottom: '2rem',
   },
   brandText: {
     fontFamily: 'var(--font-display)',
@@ -381,19 +552,20 @@ const styles = {
   navMenu: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '0.5rem',
+    gap: '0.35rem',
     flex: 1,
+    overflowY: 'auto',
   },
   navLink: {
     display: 'flex',
     alignItems: 'center',
     gap: '0.85rem',
-    padding: '0.85rem 1rem',
-    borderRadius: '10px',
+    padding: '0.7rem 0.9rem',
+    borderRadius: '8px',
     color: '#9ca3af',
     textDecoration: 'none',
     fontWeight: '500',
-    fontSize: '0.95rem',
+    fontSize: '0.9rem',
     transition: 'var(--transition-smooth)',
   },
   navLinkActive: {
@@ -403,12 +575,50 @@ const styles = {
     borderTopLeftRadius: '0px',
     borderBottomLeftRadius: '0px',
   },
+  casesNavLink: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.85rem',
+    padding: '0.75rem 0.9rem',
+    borderRadius: '8px',
+    color: '#e5e7eb',
+    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+    border: '1px solid rgba(16, 185, 129, 0.2)',
+    textDecoration: 'none',
+    fontWeight: '600',
+    fontSize: '0.9rem',
+    marginBottom: '0.25rem',
+  },
+  navLinkActiveCases: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '0.85rem',
+    padding: '0.75rem 0.9rem',
+    borderRadius: '8px',
+    color: '#10b981',
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    border: '1px solid #10b981',
+    textDecoration: 'none',
+    fontWeight: '700',
+    fontSize: '0.9rem',
+    marginBottom: '0.25rem',
+  },
+  queueTag: {
+    marginLeft: 'auto',
+    fontSize: '0.62rem',
+    fontWeight: '800',
+    backgroundColor: '#10b981',
+    color: '#000',
+    padding: '0.12rem 0.4rem',
+    borderRadius: '4px',
+    textTransform: 'uppercase',
+  },
   sidebarFooter: {
     borderTop: '1px solid var(--border-color)',
-    paddingTop: '1.5rem',
+    paddingTop: '1.25rem',
     display: 'flex',
     flexDirection: 'column',
-    gap: '1rem',
+    gap: '0.85rem',
   },
   userCard: {
     display: 'flex',
@@ -448,15 +658,15 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: '0.85rem',
-    padding: '0.85rem 1rem',
-    borderRadius: '10px',
+    padding: '0.7rem 0.9rem',
+    borderRadius: '8px',
     color: '#10b981',
     backgroundColor: 'rgba(16, 185, 129, 0.05)',
     textDecoration: 'none',
     fontWeight: '500',
-    fontSize: '0.95rem',
+    fontSize: '0.9rem',
     transition: 'var(--transition-smooth)',
-    marginTop: '0.5rem',
+    marginTop: '0.25rem',
   },
   navLinkActiveAdmin: {
     backgroundColor: 'rgba(16, 185, 129, 0.2)',
@@ -467,11 +677,11 @@ const styles = {
   },
   adminTag: {
     marginLeft: 'auto',
-    fontSize: '0.65rem',
+    fontSize: '0.62rem',
     fontWeight: '700',
     backgroundColor: '#10b981',
     color: '#000',
-    padding: '0.15rem 0.4rem',
+    padding: '0.12rem 0.4rem',
     borderRadius: '4px',
     textTransform: 'uppercase',
   },
@@ -636,4 +846,3 @@ const styles = {
     textAlign: 'left',
   },
 };
-
