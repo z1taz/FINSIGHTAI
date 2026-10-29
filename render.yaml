@@ -1,12 +1,15 @@
 services:
-  # 1. FastAPI Python Backend — Docker runtime (needs build-essential for scikit-learn/numpy)
+  # 1. FastAPI Python Backend (Web Service)
   - type: web
     name: finsight-backend
-    runtime: docker
+    runtime: python
     region: oregon
-    dockerfilePath: ./Dockerfile
+    buildCommand: pip install --prefer-binary -r backend/requirements.txt
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.14
       - key: DATABASE_URL
         fromDatabase:
           name: finsight-postgres
