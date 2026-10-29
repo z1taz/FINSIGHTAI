@@ -1,5 +1,5 @@
 services:
-  # 1. FastAPI Python Backend Service
+  # 1. FastAPI Python Backend (Web Service)
   - type: web
     name: finsight-backend
     runtime: python
@@ -15,19 +15,27 @@ services:
       - key: SECRET_KEY
         generateValue: true
 
-  # 2. React Vite Frontend Static Site
+  # 2. React Vite Frontend (Static Site)
+  # IMPORTANT: After backend deploys, set VITE_API_URL manually in the
+  # finsight-frontend service environment to:
+  #   https://<your-backend-slug>.onrender.com/api
+  # Then trigger a manual redeploy of the frontend.
   - type: web
     name: finsight-frontend
     runtime: static
     region: oregon
     buildCommand: cd frontend && npm install && npm run build
     staticPublishPath: ./frontend/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
     envVars:
       - key: VITE_API_URL
         value: https://finsight-backend.onrender.com/api
 
 databases:
-  # 3. Managed Render PostgreSQL Database
+  # 3. Managed PostgreSQL (Free tier)
   - name: finsight-postgres
     databaseName: finsight
     user: finsight_user
