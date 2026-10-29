@@ -108,7 +108,7 @@ async def startup_event():
             print(f"Retrying in {wait_time} seconds...")
             await asyncio.sleep(wait_time)
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root():
     return {
         "platform": "FinSight AI Risk Operations",
