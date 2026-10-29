@@ -1,11 +1,10 @@
 services:
-  # 1. FastAPI Python Backend (Web Service)
+  # 1. FastAPI Python Backend — Docker runtime (needs build-essential for scikit-learn/numpy)
   - type: web
     name: finsight-backend
-    runtime: python
+    runtime: docker
     region: oregon
-    buildCommand: pip install -r backend/requirements.txt
-    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    dockerfilePath: ./Dockerfile
     healthCheckPath: /
     envVars:
       - key: DATABASE_URL
@@ -16,10 +15,6 @@ services:
         generateValue: true
 
   # 2. React Vite Frontend (Static Site)
-  # IMPORTANT: After backend deploys, set VITE_API_URL manually in the
-  # finsight-frontend service environment to:
-  #   https://<your-backend-slug>.onrender.com/api
-  # Then trigger a manual redeploy of the frontend.
   - type: web
     name: finsight-frontend
     runtime: static
@@ -32,7 +27,7 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_URL
-        value: https://finsight-backend.onrender.com/api
+        value: https://finsight-backend-3fh8.onrender.com/api
 
 databases:
   # 3. Managed PostgreSQL (Free tier)
